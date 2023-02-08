@@ -19,7 +19,7 @@
         <activity
             android:name=".CameraGetActivity"
             android:exported="false"
-            android:launchMode="singleTask">
+            android:launchMode="singleTop">
             <meta-data
                 android:name="android.app.lib_name"
                 android:value="" />
