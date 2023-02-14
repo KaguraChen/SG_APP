@@ -4,9 +4,11 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Looper;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.Toast;
 
 import java.net.Socket;
 
@@ -41,15 +43,15 @@ public class MainActivity extends AppCompatActivity {
                             MainActivity.this.startActivity(intent);//启动新的Intent
                         }catch (Exception e){
                             e.printStackTrace();
+                            Looper.prepare();
+                            Toast.makeText(MainActivity.this, "连接失败", Toast.LENGTH_SHORT).show();
+                            Looper.loop();
 
                         }
 
                     }
                 };
                 myThread.start();//启动线程
-
-
-
             }
         });
     }

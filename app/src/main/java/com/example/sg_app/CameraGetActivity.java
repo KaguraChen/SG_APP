@@ -16,6 +16,8 @@ import org.opencv.android.LoaderCallbackInterface;
 import org.opencv.android.OpenCVLoader;
 import org.opencv.android.Utils;
 import org.opencv.core.Mat;
+import org.opencv.core.Size;
+import org.opencv.imgproc.Imgproc;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -45,6 +47,7 @@ public class CameraGetActivity extends CameraActivity {
     private Mat img;
     private Mat receiveImg;
     private boolean exitFlag;
+    private boolean flag;
 
 
 
@@ -62,12 +65,15 @@ public class CameraGetActivity extends CameraActivity {
         @Override
         public Mat onCameraFrame(CameraBridgeViewBase.CvCameraViewFrame inputFrame) {
             img = inputFrame.rgba();
+            flag = !flag;
+            if (flag)
+                return receiveImg;
             Mat img0 =  img.clone();//复制图像矩阵用于处理
-//            Imgproc.resize(img0,img0, new Size(24, 24));//放缩图像降低传输的延时
+            Imgproc.resize(img0,img0, new Size(540, 540));//放缩图像降低传输的延时
             Bitmap bitmap = Bitmap.createBitmap(img0.width(), img0.height(), Bitmap.Config.ARGB_8888);
             Utils.matToBitmap(img0, bitmap,true);//转变Mat为Bitmap
             ByteArrayOutputStream bout = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 100, bout);
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 50, bout);
             byte[] imgBytes = bout.toByteArray();
 //            String sender = Base64.encodeToString(imgBytes,Base64.DEFAULT);//Base64编码
             String len_str = String.format("%-16d", imgBytes.length);
@@ -165,13 +171,16 @@ private BaseLoaderCallback baseLoaderCallback = new BaseLoaderCallback(this) {
                         bos.close();
                         returnBmp = BitmapFactory.decodeByteArray(array, 0, imgLen);
                         Mat recImg = new Mat();
-                        System.out.println("接收照片"+cnt+"张");
+//                        System.out.println("接收照片"+cnt+"张");
                         ++cnt;
                         Utils.bitmapToMat(returnBmp, recImg);
-                        if (recImg != null)
-                            receiveImg = recImg;
+                        if (recImg != null && img != null) {
+                            Mat dest = new Mat();
+                            Imgproc.resize(recImg,dest, new Size(1080, 1080));//放缩图像降低传输的延时
+                            receiveImg = dest.clone();
+                        }
 //                         reciveImg = Imgcodecs.imdecode(new MatOfByte(array), Imgcodecs.IMREAD_COLOR);
-                        Thread.sleep(1);
+//                        Thread.sleep(1);
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
@@ -189,7 +198,7 @@ private BaseLoaderCallback baseLoaderCallback = new BaseLoaderCallback(this) {
 
     @Override
     public void onPause() {
-        Log.i(TAG, "onPause");
+//        Log.i(TAG, "onPause");
         super.onPause();
         if (javaCameraView != null) {
             javaCameraView.disableView();
@@ -220,8 +229,8 @@ private BaseLoaderCallback baseLoaderCallback = new BaseLoaderCallback(this) {
             br.close();
             bis.close();
             CameraGetActivity.this.finish();
-            System.out.println("结束");
-        } catch (IOException e) {
+//            System.out.println("结束");
+        } catch (Exception e) {
             e.printStackTrace();
         }
 
@@ -235,5 +244,3 @@ private BaseLoaderCallback baseLoaderCallback = new BaseLoaderCallback(this) {
     }
 
 }
-
-
