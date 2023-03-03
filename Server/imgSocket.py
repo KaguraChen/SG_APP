@@ -5,24 +5,28 @@ import numpy as np
 import threading
 import time
 import mediapipe as mp
+import pymssql
+from PIL import Image, ImageDraw, ImageFont
 from pyzbar import pyzbar
 
 class Gesture_reg:
+    # 手势识别
     def __init__(self):
         self.mpHands = mp.solutions.hands
         self.hands = self.mpHands.Hands(
             static_image_mode=False,
             max_num_hands=1,
             model_complexity=0,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+            min_detection_confidence=0.4,
+            min_tracking_confidence=0.4
         )
         self.mpDraw = mp.solutions.drawing_utils
         self.t1 = time.time()
-        self.px1 = [0] * 21
-        self.py1 = [0] * 21
+        self.px1 = [0] * 21     # 点的x坐标
+        self.py1 = [0] * 21     # 点的y坐标
 
     def calc_v(self, t1, p1, t2, p2):
+        # 速度计算
         return (p2 - p1) / (t2 - t1)
 
     def process(self, img):
@@ -35,41 +39,45 @@ class Gesture_reg:
             for handLms in result.multi_hand_landmarks:
                 self.mpDraw.draw_landmarks(img, handLms, self.mpHands.HAND_CONNECTIONS)
                 for i, lm in enumerate(handLms.landmark):
-                    if self.px1[-1] == 0 or self.py1[-1] == 0:
+                    if self.px1[-1] == 0 or self.py1[-1] == 0:  # 如果列表都是零
                         self.px1[i] = lm.x
                         self.py1[i] = lm.y
-                    else:
+                    else:   # 计算速度
                         vx += self.calc_v(self.t1, self.px1[i], self.t2, lm.x)
                         self.px1[i] = lm.x
                         vy += self.calc_v(self.t1, self.py1[i], self.t2, lm.y)
                         self.py1[i] = lm.y
-        else:
-            self.px1 = [0]*21
+        else:   # 没有手的话重新赋零
+            self.px1 = [0] * 21
             self.py1 = [0] * 21
         if (abs(vx) > 40):
             print("向左") if vx < 0 else print("向右")
         elif (abs(vy) > 40):
             print("向上") if vy < 0 else print("向下")
-        # print(v)
-        self.t1 = self.t2
+        self.t1 = self.t2   # 时间重新赋值
         return img
 
 class ImgSocket:
     def __init__(self):
         self.HOST = socket.gethostbyname(socket.gethostname())
         self.PORT = 8080
-        self.img = None
-        self.cnt = 0
-        self.mode_cnt = 0
-        self.start = 0
-        self.end = 0
-        self.discnt_flag = False
+        self.img = None     # 接受的图片
+        self.cnt = 0        # 接受的图片次数
+        self.mode_cnt = 0   # 用于计算帧率
+        self.start = 0      # 用于计算帧率开始时间
+        self.end = 0        # 用于计算帧率结束时间
+        self.discnt_flag = False    # 断开连接标志
         self.FPS = 0
         self.gesture = Gesture_reg()
         self.tcpSerSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcpSerSock.bind((self.HOST, self.PORT))
+        self.db = pymssql.connect(server='localhost', user='sa', password='100885Zlc.', charset='GBK')
+        self.cursor = self.db.cursor()
+        self.sql_time = time.time()     # 用于限制数据库查询次数
+        self.msg = ""   # 数据库查询结果信息
 
     def scan_qrcode(self, qrcode):
+        # 扫码
         try:
             data = pyzbar.decode(qrcode)
             if data == []:
@@ -79,6 +87,7 @@ class ImgSocket:
             return ""
 
     def recvall(self, sock, count):
+        # socket接受数据
         start = time.time()
         buf = b''  # buf是一个byte类型
         while count:
@@ -91,19 +100,49 @@ class ImgSocket:
             count -= len(newbuf)
         return buf
 
+    def sql_find(self, msg):
+        # 数据库查询
+        sql = f'''
+            select * from SheepInfo.dbo.ID 
+            where ID = {msg}
+        '''
+        self.cursor.execute(sql)
+        return self.cursor.fetchall()[0]
+
+    def cv2AddChineseText(self, img, text, position, textColor=(255, 255, 255), textSize=15):
+        if (isinstance(img, np.ndarray)):  # 判断是否OpenCV图片类型
+            img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        # 创建一个可以在给定图像上绘图的对象
+        draw = ImageDraw.Draw(img)
+        # 字体的格式
+        fontStyle = ImageFont.truetype(
+            "simsun.ttc", textSize, encoding="utf-8")
+        # 绘制文本
+        draw.text(position, text, textColor, font=fontStyle)
+        # 转换回OpenCV格式
+        return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)
+
     def add_text(self, img, msg):
-        cv2.putText(img, f"FPS:{self.FPS}", (int(img.shape[1]*0.1), int(img.shape[0]*0.1)), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5, (255, 255, 255))
+        img = self.cv2AddChineseText(img, f"FPS:{self.FPS}", (int(img.shape[1] * 0.1), int(img.shape[0] * 0.1)))
         if msg != "":
-            cv2.putText(img, msg, (int(img.shape[1]*0.3), int(img.shape[0]*0.1)), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.4, (255, 255, 255))
+            img = self.cv2AddChineseText(img, 'ID: '+str(msg[0]), (int(img.shape[1] * 0.1), int(img.shape[0] * 0.4)))
+            img = self.cv2AddChineseText(img, '名字: '+str(msg[1]), (int(img.shape[1] * 0.1), int(img.shape[0] * 0.45)))
+            img = self.cv2AddChineseText(img, '年龄: '+str(msg[2]), (int(img.shape[1] * 0.1), int(img.shape[0] * 0.5)))
+            img = self.cv2AddChineseText(img, '体重: '+str(msg[3]), (int(img.shape[1] * 0.1), int(img.shape[0] * 0.55)))
         return img
 
     def img_process(self, img):
         img = cv2.flip(cv2.transpose(img), 1)  # 由于接收到的图片方向不对，故在此旋转
         img = self.gesture.process(img)
-        msg = self.scan_qrcode(img)
-        img = self.add_text(img, msg)
+        if time.time() - self.sql_time > 1: # 如果扫码间隔大于1秒
+            self.sql_time = time.time()
+            msg = self.scan_qrcode(img)
+            try:
+                msg = int(msg)
+                self.msg = self.sql_find(msg)
+            except:
+                self.msg = ""
+        img = self.add_text(img, self.msg)
         return img
 
     def recv_img(self, tcpCliSock, addr):
@@ -123,11 +162,11 @@ class ImgSocket:
                 # print(img.shape)
                 self.img = self.img_process(img)
 
-                img_bytes = cv2.imencode('.jpg', self.img, [cv2.IMWRITE_JPEG_QUALITY, 95])[1].tobytes()
+                img_bytes = cv2.imencode('.jpg', self.img, [cv2.IMWRITE_JPEG_QUALITY, 95])[1].tobytes() # 将图像编码为二进制
                 tcpCliSock.send(("%-16d" % len(img_bytes)).encode("utf-8"))
                 # print("发送的图片长度为{}".format("%-16d" % len(img_bytes)))
                 tcpCliSock.send(img_bytes)
-                if self.mode_cnt == 5:
+                if self.mode_cnt == 5:  # 每接受五次图像计算一次FPS
                     try:
                         self.end = time.time()
                         seconds = self.end - self.start
@@ -138,7 +177,7 @@ class ImgSocket:
                     finally:
                         self.mode_cnt = 0
             # except (TimeoutError, ConnectionResetError):
-            except:
+            except Exception as e:
                 print(addr, "断开连接")
                 self.discnt_flag = True
                 self.mode_cnt = 0
@@ -149,6 +188,7 @@ class ImgSocket:
     def run(self):
         self.tcpSerSock.listen(1)
         print(f"端口在{self.HOST}:{self.PORT}处开放")
+
         while True:
             print('\n等待连接...')
             tcpCliSock, addr = self.tcpSerSock.accept()
@@ -158,9 +198,7 @@ class ImgSocket:
             t.setDaemon(True)
             t.start()
             self.discnt_flag = False
-            while True:
-                if self.discnt_flag:
-                    break
+            while not self.discnt_flag:
                 try:
                     cv2.imshow("recv1", self.img)
                 except Exception:
@@ -169,6 +207,10 @@ class ImgSocket:
             cv2.destroyAllWindows()
             tcpCliSock.close()
 
+    def __del__(self):
+        self.cursor.close()
+        self.db.close()
+
 if __name__ == '__main__':
-    imskt = ImgSocket()
-    imskt.run()
+    sock = ImgSocket()
+    sock.run()
